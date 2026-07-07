@@ -1,0 +1,527 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+<meta charset="UTF-8">
+<meta name="viewport" content="width=device-width, initial-scale=1.0">
+<title>WEBM → GIF Bench</title>
+<script src="https://cdnjs.cloudflare.com/ajax/libs/gif.js/0.2.0/gif.js"></script>
+<style>
+  :root {
+    --bg: #15171d;
+    --panel: #1d2028;
+    --panel-2: #23262f;
+    --line: #32363f;
+    --ink: #e9e7e1;
+    --ink-dim: #8b90a0;
+    --amber: #f2b83b;
+    --amber-dim: #8a6a22;
+    --green: #6fd08c;
+    --red: #e5735f;
+    --mono: ui-monospace, "SF Mono", "Cascadia Mono", Consolas, monospace;
+    --sans: -apple-system, "Segoe UI", Roboto, Helvetica, Arial, sans-serif;
+  }
+  * { box-sizing: border-box; margin: 0; padding: 0; }
+  html, body { background: var(--bg); color: var(--ink); font-family: var(--sans); }
+  body { padding: 32px 20px 80px; max-width: 880px; margin: 0 auto; }
+
+  /* Header */
+  header { margin-bottom: 28px; }
+  h1 { font-size: 26px; font-weight: 700; letter-spacing: -0.02em; }
+  h1 .arrow { color: var(--amber); }
+  .tagline { font-family: var(--mono); font-size: 12px; color: var(--ink-dim); margin-top: 6px; }
+
+  /* Drop zone */
+  #drop {
+    border: 1.5px dashed var(--line);
+    border-radius: 10px;
+    background: var(--panel);
+    padding: 36px 20px;
+    text-align: center;
+    cursor: pointer;
+    transition: border-color 0.15s, background 0.15s;
+  }
+  #drop:hover, #drop.dragging { border-color: var(--amber); background: var(--panel-2); }
+  #drop:focus-visible { outline: 2px solid var(--amber); outline-offset: 2px; }
+  #drop .big { font-size: 15px; font-weight: 600; }
+  #drop .small { font-family: var(--mono); font-size: 11.5px; color: var(--ink-dim); margin-top: 8px; }
+  #fileInput { display: none; }
+
+  /* Settings */
+  .settings {
+    display: grid;
+    grid-template-columns: 1fr 1fr 1fr;
+    gap: 14px;
+    margin: 18px 0 22px;
+  }
+  .setting {
+    background: var(--panel);
+    border: 1px solid var(--line);
+    border-radius: 10px;
+    padding: 14px 16px;
+  }
+  .setting label {
+    display: block;
+    font-family: var(--mono);
+    font-size: 11px;
+    text-transform: uppercase;
+    letter-spacing: 0.08em;
+    color: var(--ink-dim);
+    margin-bottom: 10px;
+  }
+  .setting .value {
+    font-family: var(--mono);
+    font-size: 14px;
+    color: var(--amber);
+    float: right;
+  }
+  input[type=range] {
+    width: 100%;
+    accent-color: var(--amber);
+    cursor: pointer;
+  }
+  select {
+    width: 100%;
+    background: var(--panel-2);
+    color: var(--ink);
+    border: 1px solid var(--line);
+    border-radius: 6px;
+    padding: 8px 10px;
+    font-family: var(--mono);
+    font-size: 13px;
+    cursor: pointer;
+  }
+  select:focus-visible, input:focus-visible, button:focus-visible { outline: 2px solid var(--amber); outline-offset: 2px; }
+  .hint { font-family: var(--mono); font-size: 10.5px; color: var(--ink-dim); margin-top: 8px; line-height: 1.5; }
+
+  /* Action row */
+  .actions { display: flex; gap: 10px; margin-bottom: 22px; flex-wrap: wrap; }
+  button {
+    font-family: var(--sans);
+    font-size: 14px;
+    font-weight: 600;
+    border-radius: 8px;
+    padding: 10px 20px;
+    cursor: pointer;
+    border: 1px solid transparent;
+    transition: filter 0.1s;
+  }
+  button:hover:not(:disabled) { filter: brightness(1.12); }
+  button:disabled { opacity: 0.4; cursor: not-allowed; }
+  .btn-primary { background: var(--amber); color: #1a1405; }
+  .btn-ghost { background: transparent; color: var(--ink); border-color: var(--line); }
+
+  /* Queue cards */
+  .card {
+    background: var(--panel);
+    border: 1px solid var(--line);
+    border-radius: 10px;
+    padding: 16px;
+    margin-bottom: 12px;
+  }
+  .card-top { display: flex; align-items: baseline; gap: 10px; flex-wrap: wrap; }
+  .fname { font-weight: 600; font-size: 14px; overflow-wrap: anywhere; }
+  .fmeta { font-family: var(--mono); font-size: 11px; color: var(--ink-dim); }
+  .status { font-family: var(--mono); font-size: 11px; margin-left: auto; }
+  .status.working { color: var(--amber); }
+  .status.done { color: var(--green); }
+  .status.error { color: var(--red); }
+  .remove {
+    background: none; border: none; color: var(--ink-dim);
+    font-size: 16px; padding: 0 4px; line-height: 1;
+  }
+  .remove:hover { color: var(--red); }
+
+  /* Filmstrip */
+  .strip {
+    display: flex;
+    gap: 4px;
+    margin-top: 12px;
+    padding: 6px;
+    background: #101218;
+    border-radius: 6px;
+    overflow-x: auto;
+    min-height: 0;
+  }
+  .strip:empty { display: none; }
+  .strip img {
+    height: 48px;
+    border-radius: 3px;
+    border-top: 3px solid #000;
+    border-bottom: 3px solid #000;
+    flex-shrink: 0;
+  }
+
+  /* Progress */
+  .bar { height: 4px; background: var(--panel-2); border-radius: 2px; margin-top: 12px; overflow: hidden; display: none; }
+  .bar .fill { height: 100%; width: 0%; background: var(--amber); border-radius: 2px; transition: width 0.2s; }
+  .card.active .bar { display: block; }
+
+  /* Result */
+  .result { display: none; margin-top: 14px; align-items: center; gap: 14px; flex-wrap: wrap; }
+  .card.finished .result { display: flex; }
+  .result img { max-height: 110px; border-radius: 6px; border: 1px solid var(--line); }
+  .result .out-size { font-family: var(--mono); font-size: 12px; color: var(--green); }
+  .result a {
+    color: var(--amber); font-family: var(--mono); font-size: 13px;
+    text-decoration: none; border: 1px solid var(--amber-dim);
+    border-radius: 6px; padding: 7px 14px;
+  }
+  .result a:hover { background: var(--amber); color: #1a1405; }
+
+  #empty { font-family: var(--mono); font-size: 12px; color: var(--ink-dim); text-align: center; padding: 20px 0; }
+
+  @media (max-width: 620px) {
+    .settings { grid-template-columns: 1fr; }
+  }
+  @media (prefers-reduced-motion: reduce) {
+    * { transition: none !important; }
+  }
+</style>
+</head>
+<body>
+
+<header>
+  <h1>WEBM <span class="arrow">→</span> GIF</h1>
+  <div class="tagline">batch converter · runs entirely in your browser · nothing gets uploaded</div>
+</header>
+
+<div id="drop" tabindex="0" role="button" aria-label="Add video files">
+  <div class="big">Drop WEBM files here, or click to browse</div>
+  <div class="small">MP4 and MOV work too, since the browser decodes them the same way</div>
+</div>
+<input type="file" id="fileInput" accept="video/*" multiple>
+
+<div class="settings">
+  <div class="setting">
+    <label>Frame rate <span class="value" id="fpsVal">12 fps</span></label>
+    <input type="range" id="fps" min="2" max="30" value="12">
+    <div class="hint">Higher looks smoother but multiplies file size fast. 10 to 15 is the sweet spot for most clips.</div>
+  </div>
+  <div class="setting">
+    <label>Quality <span class="value" id="qVal">7 / 10</span></label>
+    <input type="range" id="quality" min="1" max="10" value="7">
+    <div class="hint">Controls color sampling. Lower it for smaller files with slightly rougher color.</div>
+  </div>
+  <div class="setting">
+    <label>Output width</label>
+    <select id="maxWidth">
+      <option value="0">Original size</option>
+      <option value="640">640 px</option>
+      <option value="480" selected>480 px</option>
+      <option value="360">360 px</option>
+      <option value="240">240 px</option>
+    </select>
+    <div class="hint">The biggest lever for compression. Halving width roughly quarters the file size.</div>
+  </div>
+</div>
+
+<div class="actions">
+  <button class="btn-primary" id="convertAll" disabled>Convert all</button>
+  <button class="btn-ghost" id="downloadAll" disabled>Download all GIFs</button>
+  <button class="btn-ghost" id="clearAll" disabled>Clear queue</button>
+</div>
+
+<div id="queue"><div id="empty">Queue is empty. Add some files above.</div></div>
+
+<script>
+(() => {
+  const WORKER_SRC = 'https://cdnjs.cloudflare.com/ajax/libs/gif.js/0.2.0/gif.worker.js';
+  const MAX_FRAMES = 900;
+
+  const drop = document.getElementById('drop');
+  const fileInput = document.getElementById('fileInput');
+  const queueEl = document.getElementById('queue');
+  const emptyEl = document.getElementById('empty');
+  const convertAllBtn = document.getElementById('convertAll');
+  const downloadAllBtn = document.getElementById('downloadAll');
+  const clearAllBtn = document.getElementById('clearAll');
+  const fpsInput = document.getElementById('fps');
+  const qInput = document.getElementById('quality');
+  const widthSel = document.getElementById('maxWidth');
+
+  let jobs = [];
+  let running = false;
+  let workerURL = null;
+
+  fpsInput.addEventListener('input', () => {
+    document.getElementById('fpsVal').textContent = fpsInput.value + ' fps';
+  });
+  qInput.addEventListener('input', () => {
+    document.getElementById('qVal').textContent = qInput.value + ' / 10';
+  });
+
+  /* File intake */
+  drop.addEventListener('click', () => fileInput.click());
+  drop.addEventListener('keydown', e => {
+    if (e.key === 'Enter' || e.key === ' ') { e.preventDefault(); fileInput.click(); }
+  });
+  fileInput.addEventListener('change', () => { addFiles(fileInput.files); fileInput.value = ''; });
+  ['dragenter', 'dragover'].forEach(ev => drop.addEventListener(ev, e => {
+    e.preventDefault(); drop.classList.add('dragging');
+  }));
+  ['dragleave', 'drop'].forEach(ev => drop.addEventListener(ev, e => {
+    e.preventDefault(); drop.classList.remove('dragging');
+  }));
+  drop.addEventListener('drop', e => addFiles(e.dataTransfer.files));
+
+  function addFiles(fileList) {
+    for (const file of fileList) {
+      if (!file.type.startsWith('video/') && !/\.(webm|mp4|mov|mkv)$/i.test(file.name)) continue;
+      const job = { file, status: 'queued', blob: null, el: buildCard(file) };
+      jobs.push(job);
+      queueEl.appendChild(job.el.card);
+    }
+    refreshButtons();
+  }
+
+  function buildCard(file) {
+    const card = document.createElement('div');
+    card.className = 'card';
+    card.innerHTML = `
+      <div class="card-top">
+        <span class="fname"></span>
+        <span class="fmeta">${fmtSize(file.size)}</span>
+        <span class="status">queued</span>
+        <button class="remove" aria-label="Remove file" title="Remove">✕</button>
+      </div>
+      <div class="strip"></div>
+      <div class="bar"><div class="fill"></div></div>
+      <div class="result">
+        <img alt="GIF preview">
+        <span class="out-size"></span>
+        <a download>Download GIF</a>
+      </div>`;
+    card.querySelector('.fname').textContent = file.name;
+    const refs = {
+      card,
+      status: card.querySelector('.status'),
+      strip: card.querySelector('.strip'),
+      fill: card.querySelector('.fill'),
+      preview: card.querySelector('.result img'),
+      outSize: card.querySelector('.out-size'),
+      dl: card.querySelector('.result a'),
+      removeBtn: card.querySelector('.remove'),
+    };
+    refs.removeBtn.addEventListener('click', () => {
+      if (running) return;
+      jobs = jobs.filter(j => j.el.card !== card);
+      card.remove();
+      refreshButtons();
+    });
+    return refs;
+  }
+
+  function refreshButtons() {
+    emptyEl.style.display = jobs.length ? 'none' : 'block';
+    convertAllBtn.disabled = running || !jobs.some(j => j.status === 'queued' || j.status === 'error');
+    downloadAllBtn.disabled = running || !jobs.some(j => j.status === 'done');
+    clearAllBtn.disabled = running || jobs.length === 0;
+  }
+
+  function setStatus(job, text, cls) {
+    job.el.status.textContent = text;
+    job.el.status.className = 'status' + (cls ? ' ' + cls : '');
+  }
+
+  function fmtSize(bytes) {
+    if (bytes < 1024) return bytes + ' B';
+    if (bytes < 1048576) return (bytes / 1024).toFixed(1) + ' KB';
+    return (bytes / 1048576).toFixed(2) + ' MB';
+  }
+
+  /* Conversion pipeline */
+  convertAllBtn.addEventListener('click', async () => {
+    running = true;
+    refreshButtons();
+    try {
+      if (!workerURL) workerURL = await fetchWorker();
+      for (const job of jobs) {
+        if (job.status === 'done' || job.status === 'working') continue;
+        await convert(job).catch(err => {
+          setStatus(job, 'error: ' + (err.message || err), 'error');
+          job.status = 'error';
+        });
+      }
+    } catch (err) {
+      alert('Could not load the GIF encoder worker (' + err.message + '). If you opened this file inside a restricted viewer, try opening it directly in your browser.');
+    }
+    running = false;
+    refreshButtons();
+  });
+
+  async function fetchWorker() {
+    const resp = await fetch(WORKER_SRC);
+    if (!resp.ok) throw new Error('HTTP ' + resp.status);
+    return URL.createObjectURL(await resp.blob());
+  }
+
+  async function convert(job) {
+    job.status = 'working';
+    job.el.card.classList.add('active');
+    job.el.card.classList.remove('finished');
+    job.el.strip.innerHTML = '';
+    job.el.fill.style.width = '0%';
+    setStatus(job, 'loading video…', 'working');
+
+    const fps = parseInt(fpsInput.value, 10);
+    const gifQuality = 31 - parseInt(qInput.value, 10) * 3;
+    const maxW = parseInt(widthSel.value, 10);
+
+    const url = URL.createObjectURL(job.file);
+    const video = document.createElement('video');
+    video.muted = true;
+    video.playsInline = true;
+    video.preload = 'auto';
+    video.src = url;
+
+    try {
+      await once(video, 'loadedmetadata', 'Could not decode this video');
+      let duration = await resolveDuration(video);
+
+      const scale = maxW > 0 ? Math.min(1, maxW / video.videoWidth) : 1;
+      const w = Math.max(2, Math.round(video.videoWidth * scale));
+      const h = Math.max(2, Math.round(video.videoHeight * scale));
+
+      let totalFrames = Math.max(1, Math.floor(duration * fps));
+      if (totalFrames > MAX_FRAMES) {
+        totalFrames = MAX_FRAMES;
+        duration = MAX_FRAMES / fps;
+      }
+
+      const canvas = document.createElement('canvas');
+      canvas.width = w;
+      canvas.height = h;
+      const ctx = canvas.getContext('2d', { willReadFrequently: true });
+
+      const gif = new GIF({
+        workers: 2,
+        quality: gifQuality,
+        width: w,
+        height: h,
+        workerScript: workerURL,
+      });
+
+      const thumbEvery = Math.max(1, Math.floor(totalFrames / 12));
+
+      for (let i = 0; i < totalFrames; i++) {
+        await seek(video, Math.min(i / fps, Math.max(0, duration - 0.001)));
+        ctx.drawImage(video, 0, 0, w, h);
+        gif.addFrame(ctx, { copy: true, delay: Math.round(1000 / fps) });
+
+        if (i % thumbEvery === 0 && job.el.strip.childElementCount < 12) {
+          const thumb = document.createElement('img');
+          thumb.src = makeThumb(canvas);
+          job.el.strip.appendChild(thumb);
+        }
+        setStatus(job, `capturing frame ${i + 1}/${totalFrames}`, 'working');
+        job.el.fill.style.width = ((i + 1) / totalFrames * 60).toFixed(1) + '%';
+      }
+
+      setStatus(job, 'encoding…', 'working');
+      const blob = await renderGif(gif, p => {
+        job.el.fill.style.width = (60 + p * 40).toFixed(1) + '%';
+      });
+
+      job.blob = blob;
+      job.status = 'done';
+      job.el.card.classList.remove('active');
+      job.el.card.classList.add('finished');
+      const outURL = URL.createObjectURL(blob);
+      job.el.preview.src = outURL;
+      job.el.dl.href = outURL;
+      job.el.dl.download = job.file.name.replace(/\.[^.]+$/, '') + '.gif';
+      const ratio = (blob.size / job.file.size * 100).toFixed(0);
+      job.el.outSize.textContent = fmtSize(blob.size) + ' (' + ratio + '% of source)';
+      setStatus(job, 'done', 'done');
+    } finally {
+      URL.revokeObjectURL(url);
+      video.removeAttribute('src');
+      video.load();
+    }
+  }
+
+  function once(target, event, errMsg) {
+    return new Promise((resolve, reject) => {
+      const ok = () => { cleanup(); resolve(); };
+      const bad = () => { cleanup(); reject(new Error(errMsg)); };
+      const cleanup = () => {
+        target.removeEventListener(event, ok);
+        target.removeEventListener('error', bad);
+      };
+      target.addEventListener(event, ok);
+      target.addEventListener('error', bad);
+    });
+  }
+
+  // Recorded WEBMs often report Infinity until forced to compute a real duration
+  async function resolveDuration(video) {
+    if (isFinite(video.duration) && video.duration > 0) return video.duration;
+    video.currentTime = 1e7;
+    await new Promise(resolve => {
+      const check = () => {
+        if (isFinite(video.duration) && video.duration > 0) {
+          video.removeEventListener('durationchange', check);
+          resolve();
+        }
+      };
+      video.addEventListener('durationchange', check);
+      check();
+    });
+    await seek(video, 0);
+    return video.duration;
+  }
+
+  function seek(video, t) {
+    return new Promise((resolve, reject) => {
+      const done = () => { cleanup(); resolve(); };
+      const fail = () => { cleanup(); reject(new Error('Seek failed')); };
+      const cleanup = () => {
+        video.removeEventListener('seeked', done);
+        video.removeEventListener('error', fail);
+      };
+      video.addEventListener('seeked', done);
+      video.addEventListener('error', fail);
+      video.currentTime = t;
+    });
+  }
+
+  function renderGif(gif, onProgress) {
+    return new Promise((resolve, reject) => {
+      gif.on('progress', onProgress);
+      gif.on('finished', resolve);
+      gif.on('abort', () => reject(new Error('Encoding aborted')));
+      gif.render();
+    });
+  }
+
+  function makeThumb(canvas) {
+    const t = document.createElement('canvas');
+    const scale = 48 / canvas.height;
+    t.width = Math.max(1, Math.round(canvas.width * scale));
+    t.height = 48;
+    t.getContext('2d').drawImage(canvas, 0, 0, t.width, t.height);
+    return t.toDataURL('image/jpeg', 0.6);
+  }
+
+  /* Bulk actions */
+  downloadAllBtn.addEventListener('click', async () => {
+    for (const job of jobs) {
+      if (job.status !== 'done') continue;
+      const a = document.createElement('a');
+      a.href = URL.createObjectURL(job.blob);
+      a.download = job.file.name.replace(/\.[^.]+$/, '') + '.gif';
+      a.click();
+      await new Promise(r => setTimeout(r, 300));
+    }
+  });
+
+  clearAllBtn.addEventListener('click', () => {
+    if (running) return;
+    jobs = [];
+    queueEl.querySelectorAll('.card').forEach(c => c.remove());
+    refreshButtons();
+  });
+})();
+</script>
+</body>
+</html>
